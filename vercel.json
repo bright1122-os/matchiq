@@ -3,9 +3,7 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "rewrites": [
-    { "source": "/api/football/(.*)", "destination": "/api/football/$1" },
-    { "source": "/api/odds/(.*)",     "destination": "/api/odds/$1" },
-    { "source": "/((?!api/).*)",      "destination": "/index.html" }
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
   "headers": [
     {
