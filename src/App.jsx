@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 
 // DESIGN — token surface. Colors/shadows read from CSS vars (theme-swappable);
 // motion and typography are constants.
