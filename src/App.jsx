@@ -78,7 +78,7 @@ const LIGHT = {
  * from hairlines, depth from luminance — no dark drop shadows. The @supports-not
  * block in GlobalStyles raises surface opacity where backdrop-filter is missing. */
 const DARK = {
-  bg:        '#0A0A0C',
+  bg:        '#0B0B0D',
   card:      'rgba(255,255,255,0.04)',
   card2:     'rgba(255,255,255,0.06)',
   line:      'rgba(255,255,255,0.08)',
@@ -120,45 +120,38 @@ function GlobalStyles() {
       /* The theme vars live on the wrapper div, so the page base must paint
          there too — body sits outside the var scope and can't resolve them. */
       [data-theme] { background: var(--iq-bg); min-height: 100vh; }
-      /* Background depth — dark mode only. Three soft color orbs in the corners
-         plus the top wash, fixed so content scrolls over them. Individually near
-         invisible; through the glass blur above they give the chromatic wash. */
+      /* Dark background — one barely-visible neutral wash on a near-black base.
+         Calm and chromatically silent; richness comes from the surfaces above. */
       [data-theme="dark"] {
         background:
-          radial-gradient(circle at 15% 15%,
-            rgba(41, 151, 255, 0.12), transparent 40%),
-          radial-gradient(circle at 85% 20%,
-            rgba(140, 90, 220, 0.10), transparent 45%),
-          radial-gradient(circle at 50% 90%,
-            rgba(60, 180, 200, 0.08), transparent 50%),
-          radial-gradient(ellipse 80% 60% at 50% 0%,
-            rgba(120, 120, 140, 0.08), transparent 60%),
-          #0A0A0C;
+          radial-gradient(ellipse 100% 50% at 50% 0%,
+            rgba(255, 255, 255, 0.04),
+            transparent 70%),
+          #0B0B0D;
         background-attachment: fixed;
       }
 
       /* Glass surfaces — dark mode only, where backdrop-filter exists.
-         The saturate() bump pulls the orb color into the surface; the inset
-         top hairline is the light-catching edge. */
+         Tuned for a neutral base; the inset top hairline is the light-catching edge. */
       @supports ((backdrop-filter: blur(8px)) or (-webkit-backdrop-filter: blur(8px))) {
         [data-theme="dark"] .iq-glass,
         [data-theme="dark"] .iq-bar {
           background: linear-gradient(180deg,
-            rgba(255, 255, 255, 0.06),
+            rgba(255, 255, 255, 0.05),
             rgba(255, 255, 255, 0.03)) !important;
-          backdrop-filter: blur(24px) saturate(180%) !important;
-          -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
-          border-color: rgba(255, 255, 255, 0.10) !important;
-          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10) !important;
+          backdrop-filter: blur(20px) saturate(120%) !important;
+          -webkit-backdrop-filter: blur(20px) saturate(120%) !important;
+          border-color: rgba(255, 255, 255, 0.09) !important;
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
         }
         [data-theme="dark"] .iq-elevated {
           background: linear-gradient(180deg,
-            rgba(255, 255, 255, 0.09),
-            rgba(255, 255, 255, 0.05)) !important;
-          backdrop-filter: blur(40px) saturate(200%) !important;
-          -webkit-backdrop-filter: blur(40px) saturate(200%) !important;
-          border-color: rgba(255, 255, 255, 0.14) !important;
-          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10) !important;
+            rgba(255, 255, 255, 0.07),
+            rgba(255, 255, 255, 0.04)) !important;
+          backdrop-filter: blur(30px) saturate(140%) !important;
+          -webkit-backdrop-filter: blur(30px) saturate(140%) !important;
+          border-color: rgba(255, 255, 255, 0.12) !important;
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
         }
       }
       /* No backdrop-filter: raise surface opacity so glass still reads as surface */
@@ -196,6 +189,9 @@ function GlobalStyles() {
 
       @keyframes iq-pulse { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.55); opacity: .5; } }
       .iq-pulse { animation: iq-pulse 1.8s ease-in-out infinite; }
+
+      @keyframes iq-livedot { 0%,100% { opacity: .6; } 50% { opacity: 1; } }
+      .iq-livedot { animation: iq-livedot 2s ease-in-out infinite; }
 
       @keyframes iq-think { to { transform: rotate(360deg); } }
 
@@ -399,6 +395,33 @@ function LiveDot({ size = 8 }) {
   )
 }
 
+/* In-play signal: a soft accent dot on a slow 2s pulse — felt, not shouted */
+function PulseDot({ size = 7 }) {
+  return (
+    <span className="iq-livedot" aria-label="In play" style={{
+      width: size, height: size, borderRadius: '50%', background: T.accent,
+      boxShadow: `0 0 8px 2px color-mix(in oklab, ${T.accent} 30%, transparent)`,
+      display: 'inline-block', flexShrink: 0,
+    }} />
+  )
+}
+
+/* Score digit that crossfades vertically when its value changes */
+function AnimatedScore({ value, style }) {
+  return (
+    <span style={{ display: 'inline-grid', overflow: 'hidden', ...style }}>
+      <AnimatePresence mode="popLayout" initial={false}>
+        <motion.span key={String(value)}
+          initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
+          transition={{ duration: 0.3, ease: 'easeOut' }}
+          style={{ gridArea: '1 / 1' }}>
+          {value}
+        </motion.span>
+      </AnimatePresence>
+    </span>
+  )
+}
+
 /* Friendly language helpers — plain words first, numbers second */
 function confidencePhrase(conf) {
   const c = conf || 0
@@ -569,7 +592,7 @@ function MatchRow({ fixture: f, analyzed, tracked, onOpen, onToggleTrack }) {
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: 1,
       }}>{name}</span>
       {goals != null && (
-        <span style={{ ...type.num, fontSize: 15, fontWeight: 600, color: isLive ? T.live : T.ink }}>{goals}</span>
+        <AnimatedScore value={goals} style={{ ...type.num, fontSize: 15, fontWeight: 600, color: isLive ? T.live : T.ink }} />
       )}
     </div>
   )
@@ -581,13 +604,14 @@ function MatchRow({ fixture: f, analyzed, tracked, onOpen, onToggleTrack }) {
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(f) } }}
       style={{
         display: 'grid', gridTemplateColumns: '64px minmax(0,1fr) auto',
-        gap: 14, alignItems: 'center', padding: '15px 22px',
+        gap: 14, alignItems: 'center', padding: '22px 22px',
         borderBottom: `1px solid ${T.line}`, cursor: 'pointer',
+        background: isLive ? T.card2 : undefined,
       }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         {isLive ? (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: T.live, fontWeight: 620, fontSize: 12 }}>
-            <LiveDot size={7} /> Live
+          <span style={{ display: 'inline-flex', alignItems: 'center', paddingLeft: 2 }}>
+            <PulseDot size={8} />
           </span>
         ) : isFT ? (
           <span style={{ ...type.small, fontWeight: 560, color: T.faint, fontSize: 12 }}>Ended</span>
@@ -723,6 +747,22 @@ function MatchesScreen({
   const [when, setWhen] = useState('all') // all | live | soon
 
   const live = fixtures.filter(f => f.status === 'IN_PLAY' || f.status === 'LIVE')
+  const isMobile = useWindowWidth() < 768
+
+  /* The single highest-conviction verdict already written, if any — real data only */
+  const topPick = useMemo(() => {
+    let best = null
+    for (const [id, a] of Object.entries(analysisCache)) {
+      if (!a?.recommendation?.pick) continue
+      const fx = fixtures.find(f => String(f.id) === String(id))
+      if (!fx) continue
+      if (!best || (a.recommendation.confidence || 0) > (best.a.recommendation.confidence || 0)) best = { fx, a }
+    }
+    return best
+  }, [analysisCache, fixtures])
+  const topPickReason = topPick
+    ? ((topPick.a.recommendation.reasoning || '').split(/(?<=[.!?])\s+/)[0] || '')
+    : ''
 
   const compOptions = useMemo(() => {
     const m = new Map()
@@ -761,22 +801,50 @@ function MatchesScreen({
     )
   }
 
-  const hour = new Date().getHours()
-  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
+  const countWords = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve']
+  const headline = fixtures.length === 0
+    ? 'A quiet day.'
+    : `${countWords[fixtures.length] || fixtures.length} ${fixtures.length === 1 ? 'match' : 'matches'} today.`
+  const dateLine = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
 
   return (
     <div>
       <Reveal>
-        <div style={{ padding: '28px 0 8px' }}>
-          <div style={{ ...type.display, fontSize: 42, color: T.ink }}>{greeting}.</div>
-          <div style={{ ...type.body, fontSize: 18, color: T.sub, marginTop: 12, maxWidth: 540 }}>
-            {fixtures.length === 0
-              ? 'A quiet day — no matches on the slate right now.'
-              : <>There {fixtures.length === 1 ? 'is' : 'are'} <strong style={{ color: T.ink, fontWeight: 560 }}>{fixtures.length} {fixtures.length === 1 ? 'match' : 'matches'}</strong> on the slate
-                {live.length > 0 && <> — <strong style={{ color: T.live, fontWeight: 560 }}>{live.length} playing right now</strong></>}.
-                Open any match and we'll read it for you.</>}
+        <div style={{
+          padding: isMobile ? '48px 0 8px' : '80px 0 16px',
+          display: 'flex', flexDirection: isMobile ? 'column' : 'row',
+          alignItems: isMobile ? 'stretch' : 'flex-end',
+          justifyContent: 'space-between', gap: 28,
+        }}>
+          <div style={{ minWidth: 0 }}>
+            <h1 style={{ ...type.display, fontSize: isMobile ? 38 : 46, color: T.ink, margin: 0 }}>{headline}</h1>
+            <div style={{ ...type.body, fontSize: 17, color: T.sub, marginTop: 10 }}>
+              {dateLine}
+              {live.length > 0 && <> · <span style={{ color: T.live, fontWeight: 560 }}>{live.length} in play</span></>}
+            </div>
           </div>
+          {topPick && (
+            <Card className="iq-elevated iq-lift" onClick={() => onOpen(topPick.fx)} style={{
+              padding: 22, cursor: 'pointer', flexShrink: 0,
+              width: isMobile ? '100%' : 300,
+            }}>
+              <Eyebrow style={{ color: T.accent }}>Strongest read today</Eyebrow>
+              <div style={{ ...type.title, fontSize: 18, color: T.ink, marginTop: 10 }}>
+                {pickHeadline(topPick.a.recommendation.pick, topPick.fx)}
+              </div>
+              <div style={{ ...type.small, fontSize: 13, marginTop: 7 }}>
+                <strong style={{ color: T.ink, fontWeight: 560 }}>
+                  {Math.round((topPick.a.recommendation.confidence || 0) * 100)}% sure
+                </strong>
+                {topPickReason && <> — {topPickReason}</>}
+              </div>
+            </Card>
+          )}
         </div>
+      </Reveal>
+
+      <Reveal delay={0.04}>
+        <div style={{ height: 1, background: T.line, margin: isMobile ? '28px 0 4px' : '40px 0 8px' }} />
       </Reveal>
 
       {/* View toggle */}
@@ -831,7 +899,7 @@ function MatchesScreen({
               <EmptyNote title="Nothing here right now" hint="Try a different filter, or check back closer to kick-off." />
             </Card>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 22, marginTop: 24 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 44, marginTop: 28 }}>
               {groups.map(([name, list]) => (
                 <Reveal key={name}>
                   <Card style={{ overflow: 'hidden' }}>
@@ -1109,6 +1177,21 @@ function VerdictStory({ fixture: fx, data, onReRun }) {
   })[r.pick]
   const impliedPct = marketImplied != null ? Math.round(marketImplied * 100) : null
 
+  /* If our pick isn't the market's implied favourite, say so — confidently */
+  const impliedAll = [
+    ['home_win', data.market_analysis?.implied_home_prob],
+    ['draw', data.market_analysis?.implied_draw_prob],
+    ['away_win', data.market_analysis?.implied_away_prob],
+  ].filter(([, v]) => typeof v === 'number' && v > 0)
+  const marketFav = impliedAll.length
+    ? impliedAll.reduce((a, b) => (b[1] > a[1] ? b : a))
+    : null
+  const marketDisagrees = !!(marketFav && r.pick && marketFav[0] !== r.pick)
+  const marketFavLabel = marketFav
+    ? (marketFav[0] === 'draw' ? 'a draw' : pickShort(marketFav[0], fx))
+    : ''
+  const reasoningFirstSentence = (r.reasoning || '').split(/(?<=[.!?])\s+/)[0] || ''
+
   const analysedAt = data._ts
     ? new Date(data._ts).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
     : null
@@ -1151,6 +1234,20 @@ function VerdictStory({ fixture: fx, data, onReRun }) {
               margin: 0, fontWeight: 420,
             }}>{r.reasoning}</p>
           </Card>
+        </Reveal>
+      )}
+
+      {/* THE MARKET DISAGREES — only when our pick isn't the implied favourite */}
+      {marketDisagrees && (
+        <Reveal>
+          <div style={{ borderTop: `1px solid ${T.line}`, paddingTop: 24, padding: '24px 4px 4px' }}>
+            <div style={{ ...type.small, fontSize: 13, fontWeight: 560, color: T.faint }}>The market disagrees</div>
+            <div style={{ ...type.body, marginTop: 10 }}>
+              The market favors {marketFavLabel} at {Math.round(marketFav[1] * 100)}%.
+              We think {pickShort(r.pick, fx)} is the better call
+              {reasoningFirstSentence ? <> — {reasoningFirstSentence}</> : '.'}
+            </div>
+          </div>
         </Reveal>
       )}
 
