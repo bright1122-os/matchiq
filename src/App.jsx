@@ -245,15 +245,29 @@ function Reveal({ children, delay: d = 0, style, className }) {
   )
 }
 
+/* Theme mode is 'light' | 'dark' | 'system'; the resolved theme follows the
+ * OS preference (live) when mode is 'system'. Stored values from older builds
+ * ('light'/'dark') read back unchanged. */
 function useTheme() {
-  const [theme, setTheme] = useState(() => {
-    if (typeof window === 'undefined') return 'light'
+  const [mode, setMode] = useState(() => {
+    if (typeof window === 'undefined') return 'system'
     const saved = readRaw(LS_THEME)
-    if (saved === 'light' || saved === 'dark') return saved
-    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+    return saved === 'light' || saved === 'dark' ? saved : 'system'
   })
-  useEffect(() => { writeRaw(LS_THEME, theme) }, [theme])
-  return [theme, () => setTheme(t => (t === 'dark' ? 'light' : 'dark')), setTheme]
+  const [sysDark, setSysDark] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia
+      ? window.matchMedia('(prefers-color-scheme: dark)').matches : false)
+  useEffect(() => {
+    if (!window.matchMedia) return
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const on = (e) => setSysDark(e.matches)
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
+  useEffect(() => { writeRaw(LS_THEME, mode) }, [mode])
+  const theme = mode === 'system' ? (sysDark ? 'dark' : 'light') : mode
+  const toggle = () => setMode(theme === 'dark' ? 'light' : 'dark')
+  return [theme, toggle, setMode, mode]
 }
 
 function useWindowWidth() {
@@ -485,7 +499,7 @@ function Wordmark({ size = 22, withMark = true }) {
   )
 }
 
-function Header({ theme, onToggleTheme, tab, onTab, isMobile, liveCount }) {
+function Header({ theme, onToggleTheme, tab, onTab, isMobile, liveCount, user, onOpenProfile }) {
   const dateStr = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
   return (
     <header className="iq-bar" style={{
@@ -540,6 +554,14 @@ function Header({ theme, onToggleTheme, tab, onTab, isMobile, liveCount }) {
             }}>
             {theme === 'dark' ? <Sun size={16} strokeWidth={1.8} /> : <Moon size={16} strokeWidth={1.8} />}
           </button>
+          {user && (
+            <button onClick={onOpenProfile} aria-label="Open your profile" style={{
+              background: 'transparent', border: 'none', cursor: 'pointer', padding: 2,
+              display: 'inline-flex', borderRadius: '50%',
+            }}>
+              <Avatar user={user} size={28} />
+            </button>
+          )}
         </div>
       </div>
     </header>
@@ -2171,8 +2193,18 @@ function AuthInput({ label, type: inputType, value, onChange, autoComplete, disa
   )
 }
 
-function AuthScreen({ theme, initialError, onClearInitialError }) {
-  const [mode, setMode] = useState('signin') // 'signin' | 'signup'
+function BackArrow({ onClick }) {
+  return (
+    <button onClick={onClick} aria-label="Back" style={{
+      background: 'transparent', border: 'none', cursor: 'pointer', color: T.faint,
+      display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 0',
+      fontFamily: T.sans, fontSize: 14, fontWeight: 500, marginBottom: 18,
+    }}><ChevronLeft size={17} strokeWidth={1.8} /> Back</button>
+  )
+}
+
+function AuthScreen({ mode, onMode, onBack, initialError, onClearInitialError }) {
+  const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(null) // null | 'google' | 'email'
@@ -2182,7 +2214,7 @@ function AuthScreen({ theme, initialError, onClearInitialError }) {
   const shownError = error || initialError
 
   function switchMode(m) {
-    setMode(m); setError(null); setCheckEmail(false)
+    onMode(m); setError(null); setCheckEmail(false)
     onClearInitialError?.()
   }
 
@@ -2202,7 +2234,7 @@ function AuthScreen({ theme, initialError, onClearInitialError }) {
     setBusy('email'); setError(null); onClearInitialError?.()
     try {
       if (mode === 'signup') {
-        const { data, error: err } = await signUpWithEmail(email.trim(), password)
+        const { data, error: err } = await signUpWithEmail(email.trim(), password, name.trim())
         if (err) setError(friendlyAuthError(err.message))
         else if (!data?.session) setCheckEmail(true)
         // With a session, onAuthChange moves the user into the app.
@@ -2220,18 +2252,21 @@ function AuthScreen({ theme, initialError, onClearInitialError }) {
   const busyAny = busy != null
 
   return (
-    <div data-theme={theme} style={{
-      minHeight: '100dvh', width: '100%', display: 'grid', placeItems: 'center',
-      padding: '32px 20px', position: 'relative', zIndex: 1,
-    }}>
-      <GlobalStyles />
-      <div style={{ width: '100%', maxWidth: 400 }}>
+    <div style={{ width: '100%', maxWidth: 400, margin: '0 auto' }}>
+      {onBack && <BackArrow onClick={onBack} />}
+      <div>
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 28 }}>
           <Wordmark size={24} />
         </div>
-        <h1 style={{ ...type.display, fontSize: 32, color: T.ink, textAlign: 'center', margin: '0 0 26px' }}>
-          {mode === 'signin' ? 'Welcome back.' : 'Make it yours.'}
+        <h1 style={{ ...type.display, fontSize: 32, color: T.ink, textAlign: 'center', margin: '0 0 8px' }}>
+          {mode === 'signin' ? 'Welcome back.' : 'Create your account'}
         </h1>
+        {mode === 'signup' && (
+          <div style={{ ...type.small, fontSize: 14.5, textAlign: 'center', marginBottom: 26 }}>
+            So your analyses follow you across devices.
+          </div>
+        )}
+        {mode === 'signin' && <div style={{ marginBottom: 18 }} />}
 
         <Card className="iq-elevated" style={{ padding: 28 }}>
           {checkEmail ? (
@@ -2267,6 +2302,10 @@ function AuthScreen({ theme, initialError, onClearInitialError }) {
               </div>
 
               <form onSubmit={handleEmail} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {mode === 'signup' && (
+                  <AuthInput label="Name" type="text" value={name} onChange={setName}
+                    autoComplete="name" disabled={busyAny} />
+                )}
                 <AuthInput label="Email" type="email" value={email} onChange={setEmail}
                   autoComplete="email" disabled={busyAny} />
                 <AuthInput label="Password" type="password" value={password} onChange={setPassword}
@@ -2307,10 +2346,311 @@ function AuthScreen({ theme, initialError, onClearInitialError }) {
 }
 
 /* ============================================================
+ * ONBOARDING — welcome → how it works → create account
+ * ============================================================ */
+
+const LS_ONBOARD = 'matchiq_onboarding_seen'
+
+function WelcomeScreen({ onStart, onSignIn, isMobile }) {
+  return (
+    <div style={{ textAlign: 'center', maxWidth: 440, margin: '0 auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'center', color: T.ink, marginBottom: 36 }}>
+        <LogoMark size={40} />
+      </div>
+      <h1 style={{ ...type.display, fontSize: isMobile ? 36 : 44, color: T.ink, margin: 0 }}>
+        Predictions worth trusting
+      </h1>
+      <div style={{ ...type.body, fontSize: 17, color: T.sub, marginTop: 16 }}>
+        AI analysis that shows its reasoning, for football matches happening today.
+      </div>
+      <div style={{ marginTop: 40 }}>
+        <Button onClick={onStart} style={{
+          padding: '14px 30px', fontSize: 16,
+          width: isMobile ? '100%' : 260,
+        }}>Get started</Button>
+      </div>
+      <button onClick={onSignIn} style={{
+        background: 'transparent', border: 'none', cursor: 'pointer',
+        ...type.small, color: T.sub, marginTop: 22,
+      }}>
+        Already have an account? <span style={{ color: T.accent, fontWeight: 560 }}>Sign in</span>
+      </button>
+    </div>
+  )
+}
+
+const HOW_CARDS = [
+  ['Three views on every match',
+    'Our system reads each match from three angles — form, tactics, and the market — separately, so their disagreements become the most useful part of the analysis.'],
+  ['One clear reasoned verdict',
+    'A synthesis step weighs those three views and delivers a plain-language recommendation, with the reasoning always visible.'],
+  ['Honest about accuracy',
+    'Every prediction is tracked against what actually happened. You see the record, not just the confidence.'],
+]
+
+function HowItWorksScreen({ onContinue, onBack, isMobile }) {
+  return (
+    <div style={{ maxWidth: 460, margin: '0 auto' }}>
+      <BackArrow onClick={onBack} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        {HOW_CARDS.map(([heading, body]) => (
+          <Card key={heading} style={{ padding: 28 }}>
+            <div style={{ ...type.title, fontSize: 18, color: T.ink }}>{heading}</div>
+            <div style={{ ...type.small, fontSize: 14.5, marginTop: 9 }}>{body}</div>
+          </Card>
+        ))}
+      </div>
+      <div style={{ marginTop: 32, textAlign: 'center' }}>
+        <Button onClick={onContinue} style={{
+          padding: '14px 30px', fontSize: 16,
+          width: isMobile ? '100%' : 260,
+        }}>Continue</Button>
+      </div>
+    </div>
+  )
+}
+
+/* Routes the signed-out experience. First-time visitors walk welcome → how →
+ * sign up; anyone who has signed in before (LS_ONBOARD set) goes straight to
+ * sign in. Screens hand off with a gentle 250ms fade-and-slide. */
+function OnboardingFlow({ theme, initialError, onClearInitialError }) {
+  const isMobile = useWindowWidth() < 768
+  const [stage, setStage] = useState(() =>
+    (typeof window !== 'undefined' && window.localStorage.getItem(LS_ONBOARD) === 'true') ? 'signin' : 'welcome')
+
+  return (
+    <div data-theme={theme} style={{
+      minHeight: '100dvh', width: '100%', display: 'grid', placeItems: 'center',
+      padding: '32px 20px', position: 'relative', zIndex: 1, overflow: 'hidden',
+    }}>
+      <GlobalStyles />
+      <AnimatePresence mode="wait">
+        <motion.div key={stage}
+          initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }}
+          transition={{ duration: 0.25, ease: 'easeOut' }}
+          style={{ width: '100%' }}>
+          {stage === 'welcome' && (
+            <WelcomeScreen isMobile={isMobile}
+              onStart={() => setStage('how')} onSignIn={() => setStage('signin')} />
+          )}
+          {stage === 'how' && (
+            <HowItWorksScreen isMobile={isMobile}
+              onContinue={() => setStage('signup')} onBack={() => setStage('welcome')} />
+          )}
+          {(stage === 'signin' || stage === 'signup') && (
+            <AuthScreen mode={stage} onMode={setStage}
+              onBack={stage === 'signup' ? () => setStage('how') : undefined}
+              initialError={initialError} onClearInitialError={onClearInitialError} />
+          )}
+        </motion.div>
+      </AnimatePresence>
+    </div>
+  )
+}
+
+/* ============================================================
+ * PROFILE — identity, record, preferences, sign out
+ * ============================================================ */
+
+function Avatar({ user, size = 28 }) {
+  const [failed, setFailed] = useState(false)
+  const url = user?.user_metadata?.avatar_url
+  const initial = (user?.user_metadata?.name || user?.user_metadata?.full_name || user?.email || '?')
+    .trim().charAt(0).toUpperCase() || '?'
+  if (url && !failed) {
+    return (
+      <img src={url} alt="" onError={() => setFailed(true)} referrerPolicy="no-referrer" style={{
+        width: size, height: size, borderRadius: '50%', objectFit: 'cover',
+        display: 'block', border: `1px solid ${T.line}`,
+      }} />
+    )
+  }
+  return (
+    <span className="iq-glass" style={{
+      width: size, height: size, borderRadius: '50%',
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      background: T.card2, border: `1px solid ${T.line}`,
+      color: T.accent, fontFamily: T.sans, fontWeight: 650, fontSize: Math.round(size * 0.42),
+    }}>{initial}</span>
+  )
+}
+
+function Toggle({ on, onChange }) {
+  return (
+    <button role="switch" aria-checked={on} onClick={() => onChange(!on)} style={{
+      width: 46, height: 28, borderRadius: 999, flexShrink: 0,
+      border: `1px solid ${on ? 'transparent' : T.lineHi}`,
+      background: on ? T.accent : T.card2, cursor: 'pointer', position: 'relative', padding: 0,
+    }}>
+      <span style={{
+        position: 'absolute', top: 2, left: on ? 19 : 2, width: 22, height: 22,
+        borderRadius: '50%', background: on ? T.accentInk : T.sub,
+        transition: `left 200ms ${T.ease}, background 200ms ${T.ease}`,
+      }} />
+    </button>
+  )
+}
+
+function Segmented({ value, options, onChange }) {
+  return (
+    <div style={{ display: 'flex', gap: 3, background: T.card2, borderRadius: 999, padding: 3 }}>
+      {options.map(o => (
+        <button key={o.value} onClick={() => onChange(o.value)} style={{
+          background: value === o.value ? T.card : 'transparent',
+          color: value === o.value ? T.ink : T.sub,
+          border: 'none', boxShadow: value === o.value ? T.shadow : 'none',
+          borderRadius: 999, padding: '6px 14px', cursor: 'pointer',
+          fontFamily: T.sans, fontSize: 12.5, fontWeight: value === o.value ? 600 : 480,
+        }}>{o.label}</button>
+      ))}
+    </div>
+  )
+}
+
+function ProfileScreen({
+  user, analysisCache, themeMode, onThemeMode,
+  emailNotifications, onEmailNotifications, onSignOut, isMobile,
+}) {
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  const displayName = user?.user_metadata?.name || user?.user_metadata?.full_name || user?.email || ''
+  const memberSince = user?.created_at
+    ? new Date(user.created_at).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+    : null
+
+  /* Everything below is computed from the real analysis cache — no invented numbers */
+  const entries = Object.values(analysisCache)
+  const total = entries.length
+  const uniqueMatches = new Set(Object.keys(analysisCache)).size
+  const resolved = entries.filter(a => a.resolved)
+  const correct = resolved.filter(a => a.correct).length
+  const accuracy = resolved.length ? Math.round((correct / resolved.length) * 100) : 0
+  const confs = entries.map(a => a.recommendation?.confidence).filter(c => typeof c === 'number')
+  const avgConf = confs.length ? Math.round((confs.reduce((s, c) => s + c, 0) / confs.length) * 100) : null
+  let bestStreak = 0
+  {
+    let run = 0
+    resolved.slice().sort((a, b) => (a.resolvedAt || a._ts || 0) - (b.resolvedAt || b._ts || 0))
+      .forEach(a => { if (a.correct) { run += 1; if (run > bestStreak) bestStreak = run } else run = 0 })
+  }
+
+  const deleteHref = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('Delete my account')}&body=${encodeURIComponent(`Please delete my MatchIQ account associated with ${user?.email || ''}`)}`
+
+  const StatCard = ({ big, bigColor = T.ink, bigSize = 40, context }) => (
+    <Card style={{ padding: 26 }}>
+      <div style={{ ...type.display, fontSize: bigSize, color: bigColor, fontVariantNumeric: 'tabular-nums' }}>{big}</div>
+      <div style={{ ...type.small, fontSize: 13, marginTop: 8 }}>{context}</div>
+    </Card>
+  )
+
+  const prefRow = { minHeight: isMobile ? 48 : 56, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }
+
+  return (
+    <div style={{ maxWidth: 620, margin: '0 auto' }}>
+      {/* Identity */}
+      <Reveal>
+        <div style={{ textAlign: 'center', padding: isMobile ? '40px 0' : '64px 0' }}>
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <Avatar user={user} size={isMobile ? 80 : 96} />
+          </div>
+          <div style={{ ...type.display, fontSize: isMobile ? 28 : 34, color: T.ink, marginTop: 20 }}>{displayName}</div>
+          <div style={{ ...type.small, fontSize: 14, marginTop: 8 }}>{user?.email}</div>
+          {memberSince && (
+            <span style={{
+              display: 'inline-block', marginTop: 14, ...type.small, fontSize: 12, color: T.faint,
+              border: `1px solid ${T.line}`, borderRadius: 999, padding: '5px 14px',
+            }}>Member since {memberSince}</span>
+          )}
+        </div>
+      </Reveal>
+
+      {/* Record */}
+      <Reveal>
+        <Eyebrow style={{ marginBottom: 14 }}>Your record</Eyebrow>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 16 }}>
+          <StatCard big={total} context={`across ${uniqueMatches} ${uniqueMatches === 1 ? 'match' : 'matches'}`} />
+          {resolved.length < 5 ? (
+            <StatCard big="Building a record" bigSize={22} bigColor={T.ink}
+              context={`${resolved.length} of 5 resolved`} />
+          ) : (
+            <StatCard big={`${accuracy}%`} bigColor={accuracy >= 50 ? T.accent : T.sub}
+              context={`${correct} correct out of ${resolved.length} resolved.`} />
+          )}
+          <StatCard big={avgConf != null ? `${avgConf}%` : '—'} context="across your analyses." />
+          <StatCard big={bestStreak}
+            context={bestStreak > 0 ? 'consecutive correct calls.' : 'Track a match to start.'} />
+        </div>
+      </Reveal>
+
+      {/* Preferences */}
+      <Reveal>
+        <div style={{ marginTop: 40 }}>
+          <Eyebrow style={{ marginBottom: 10 }}>Preferences</Eyebrow>
+          <Card style={{ padding: '6px 24px' }}>
+            <div style={{ ...prefRow, borderBottom: `1px solid ${T.line}` }}>
+              <span style={{ ...type.small, fontSize: 14.5, color: T.ink, fontWeight: 540 }}>Theme</span>
+              <Segmented value={themeMode} onChange={onThemeMode} options={[
+                { value: 'light', label: 'Light' },
+                { value: 'dark', label: 'Dark' },
+                { value: 'system', label: 'System' },
+              ]} />
+            </div>
+            <div style={{ padding: '12px 0 16px' }}>
+              <div style={{ ...prefRow, minHeight: 'auto' }}>
+                <span style={{ ...type.small, fontSize: 14.5, color: T.ink, fontWeight: 540 }}>Email notifications</span>
+                <Toggle on={emailNotifications} onChange={onEmailNotifications} />
+              </div>
+              <div style={{ ...type.small, fontSize: 12.5, color: T.faint, marginTop: 8 }}>
+                We'll email you when a tracked match kicks off. Coming soon.
+              </div>
+            </div>
+          </Card>
+        </div>
+      </Reveal>
+
+      {/* Sign out / delete */}
+      <Reveal>
+        <div style={{ marginTop: 48, paddingBottom: 24 }}>
+          <button onClick={onSignOut} style={{
+            background: 'transparent', border: 'none', cursor: 'pointer', padding: 0,
+            fontFamily: T.sans, fontSize: 15, fontWeight: 560, color: T.sub,
+          }}>Sign out</button>
+          <div style={{ marginTop: 18 }}>
+            {!confirmDelete ? (
+              <button onClick={() => setConfirmDelete(true)} style={{
+                background: 'transparent', border: 'none', cursor: 'pointer', padding: 0,
+                fontFamily: T.sans, fontSize: 13, color: T.faint, textDecoration: 'underline',
+              }}>Delete account</button>
+            ) : (
+              <Card style={{ padding: 22, marginTop: 6 }}>
+                <div style={{ ...type.small, fontSize: 14, color: T.ink, fontWeight: 540 }}>
+                  This permanently deletes your data. Are you sure?
+                </div>
+                <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
+                  <Button kind="soft" onClick={() => setConfirmDelete(false)}
+                    style={{ padding: '8px 20px', fontSize: 13.5 }}>Cancel</Button>
+                  <a href={deleteHref} style={{ textDecoration: 'none' }}>
+                    <Button kind="danger" onClick={() => {}}
+                      style={{ padding: '8px 20px', fontSize: 13.5 }}>Delete permanently</Button>
+                  </a>
+                </div>
+                <div style={{ ...type.small, fontSize: 12, color: T.faint, marginTop: 12 }}>
+                  This opens your mail app with a deletion request — we handle it within a few days.
+                </div>
+              </Card>
+            )}
+          </div>
+        </div>
+      </Reveal>
+    </div>
+  )
+}
+
+/* ============================================================
  * ABOUT
  * ============================================================ */
 
-function AboutScreen({ apiStatus, user, onSignOut }) {
+function AboutScreen({ apiStatus, user, onSignOut, onOpenProfile }) {
   const statuses = [
     { key: 'football', name: 'Match data' },
     { key: 'odds', name: 'Betting prices' },
@@ -2360,9 +2700,14 @@ function AboutScreen({ apiStatus, user, onSignOut }) {
                   Your follows, verdicts and theme sync to this account.
                 </div>
               </div>
-              <Button kind="ghost" onClick={onSignOut} style={{ padding: '8px 20px', fontSize: 13.5 }}>
-                Sign out
-              </Button>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <Button kind="soft" onClick={onOpenProfile} style={{ padding: '8px 20px', fontSize: 13.5 }}>
+                  View profile
+                </Button>
+                <Button kind="ghost" onClick={onSignOut} style={{ padding: '8px 20px', fontSize: 13.5 }}>
+                  Sign out
+                </Button>
+              </div>
             </div>
           </Card>
         </Reveal>
@@ -2507,6 +2852,11 @@ export default function AuthRoot() {
   const [theme] = useTheme()
   const { user, loading, authError, setAuthError } = useAuth()
 
+  // Once signed in (any method), onboarding never replays — sign-outs land on sign in.
+  useEffect(() => {
+    if (user) window.localStorage.setItem(LS_ONBOARD, 'true')
+  }, [user])
+
   // Without Supabase keys the app runs un-gated, exactly as before.
   if (!authConfigured) return <MatchIQ />
 
@@ -2520,7 +2870,7 @@ export default function AuthRoot() {
   }
 
   if (!user) {
-    return <AuthScreen theme={theme} initialError={authError}
+    return <OnboardingFlow theme={theme} initialError={authError}
       onClearInitialError={() => setAuthError(null)} />
   }
 
@@ -2531,7 +2881,8 @@ function MatchIQ({ user }) {
   const width = useWindowWidth()
   const isMobile = width < 768
 
-  const [theme, toggleTheme, setTheme] = useTheme()
+  const [theme, toggleTheme, setThemeMode, themeMode] = useTheme()
+  const [emailNotifications, setEmailNotifications] = useState(false)
 
   const [oddsCache, setOddsCache] = useState([])
   const [oddsUpdatedAt, setOddsUpdatedAt] = useState(null)
@@ -2600,8 +2951,9 @@ function MatchIQ({ user }) {
 
   /* -------- account sync — pull once on sign-in, then debounced push -------- */
   const trackedArr = useMemo(() => Array.from(tracked), [tracked])
-  useUserData(user, { tracked: trackedArr, analysisCache, agentPerf, theme }, (row) => {
-    if (row.theme === 'light' || row.theme === 'dark') setTheme(row.theme)
+  useUserData(user, { tracked: trackedArr, analysisCache, agentPerf, theme, emailNotifications }, (row) => {
+    if (row.theme === 'light' || row.theme === 'dark') setThemeMode(row.theme)
+    if (typeof row.email_notifications === 'boolean') setEmailNotifications(row.email_notifications)
     if (Array.isArray(row.tracked) && row.tracked.length) {
       setTracked(prev => new Set([...prev, ...row.tracked]))
     }
@@ -2854,8 +3206,14 @@ function MatchIQ({ user }) {
       <RecordScreen fixtures={fixtures} analysisCache={analysisCache}
         agentPerf={agentPerf} onResolve={resolveManual} onOpen={openFixture} />
     )
+    if (activeTab === 'profile') return (
+      <ProfileScreen user={user} analysisCache={analysisCache} isMobile={isMobile}
+        themeMode={themeMode} onThemeMode={setThemeMode}
+        emailNotifications={emailNotifications} onEmailNotifications={setEmailNotifications}
+        onSignOut={async () => { try { await signOut() } catch (e) { console.warn('sign out failed:', e.message) } }} />
+    )
     if (activeTab === 'about') return (
-      <AboutScreen apiStatus={apiStatus} user={user}
+      <AboutScreen apiStatus={apiStatus} user={user} onOpenProfile={() => switchTab('profile')}
         onSignOut={async () => { try { await signOut() } catch (e) { console.warn('sign out failed:', e.message) } }} />
     )
     return null
@@ -2867,7 +3225,8 @@ function MatchIQ({ user }) {
     <div data-theme={theme} style={{ minHeight: '100vh', position: 'relative', zIndex: 1 }}>
       <GlobalStyles />
       <Header theme={theme} onToggleTheme={toggleTheme}
-        tab={activeTab} onTab={switchTab} isMobile={isMobile} liveCount={liveCount} />
+        tab={activeTab} onTab={switchTab} isMobile={isMobile} liveCount={liveCount}
+        user={user} onOpenProfile={() => switchTab('profile')} />
       <main style={{
         maxWidth: 720, margin: '0 auto',
         padding: isMobile ? '18px 20px 100px' : '28px 28px 88px',
