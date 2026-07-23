@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import {
   Sun, Moon, ChevronLeft, ChevronRight, X as XIcon, Check, Heart,
-  Mail, ArrowUpRight, Plus, Minus,
+  Mail, ArrowUpRight, Plus, Minus, Eye, EyeOff,
 } from 'lucide-react'
 import '@fontsource-variable/inter'
 
@@ -21,7 +21,7 @@ import { useFixtures } from './hooks/useFixtures.js'
 import { authConfigured } from './lib/supabase.js'
 import {
   signUpWithEmail, signInWithEmail, signInWithGoogle, signOut, friendlyAuthError,
-  resetPasswordForEmail, updatePassword,
+  resetPasswordForEmail, updatePassword, resendConfirmation,
 } from './lib/auth.js'
 import { useAuth } from './hooks/useAuth.js'
 import { useUserData } from './hooks/useUserData.js'
@@ -2268,19 +2268,38 @@ function ButtonSpinner({ color = 'currentColor' }) {
 }
 
 function AuthInput({ label, type: inputType, value, onChange, autoComplete, disabled }) {
+  const isPassword = inputType === 'password'
+  const [show, setShow] = useState(false)
   return (
     <label style={{ display: 'block' }}>
       <span style={{ ...type.small, fontSize: 12.5, fontWeight: 560, color: T.sub, display: 'block', marginBottom: 7 }}>{label}</span>
-      <input type={inputType} value={value} onChange={e => onChange(e.target.value)}
-        autoComplete={autoComplete} disabled={disabled} required
-        style={{
-          width: '100%', background: T.card2, color: T.ink,
-          border: `1px solid ${T.line}`, borderRadius: 12, padding: '12px 15px',
-          fontFamily: T.sans, fontSize: 15, outline: 'none',
-        }} />
+      <span style={{ position: 'relative', display: 'block' }}>
+        <input type={isPassword && show ? 'text' : inputType} value={value}
+          onChange={e => onChange(e.target.value)}
+          autoComplete={autoComplete} disabled={disabled} required
+          style={{
+            width: '100%', background: T.card2, color: T.ink,
+            border: `1px solid ${T.line}`, borderRadius: 12,
+            padding: isPassword ? '12px 44px 12px 15px' : '12px 15px',
+            fontFamily: T.sans, fontSize: 15, outline: 'none',
+          }} />
+        {isPassword && (
+          <button type="button" onClick={() => setShow(s => !s)}
+            aria-label={show ? 'Hide password' : 'Show password'}
+            style={{
+              position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              color: T.faint, padding: 8, display: 'inline-flex',
+            }}>
+            {show ? <EyeOff size={16} strokeWidth={1.8} /> : <Eye size={16} strokeWidth={1.8} />}
+          </button>
+        )}
+      </span>
     </label>
   )
 }
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 function BackArrow({ onClick }) {
   return (
@@ -2335,43 +2354,80 @@ function AuthScreen({ mode, onMode, onBack, onForgot, initialError, onClearIniti
   const [busy, setBusy] = useState(null) // null | 'google' | 'email'
   const [error, setError] = useState(null)
   const [checkEmail, setCheckEmail] = useState(false)
+  const [notConfirmed, setNotConfirmed] = useState(false)
+  const [resent, setResent] = useState(false)
+  const googleTimer = useRef(null)
+  useEffect(() => () => clearTimeout(googleTimer.current), [])
 
   const shownError = error || initialError
 
   function switchMode(m) {
-    onMode(m); setError(null); setCheckEmail(false)
+    onMode(m); setError(null); setCheckEmail(false); setNotConfirmed(false); setResent(false)
     onClearInitialError?.()
   }
 
+  /* Errors surface the problem but never the password the user typed */
+  function fail(message) {
+    setError(message)
+    setPassword('')
+  }
+
   async function handleGoogle() {
+    if (busy) return // double-click guard — state disables the button one render later
     setBusy('google'); setError(null); onClearInitialError?.()
     try {
       const { error: err } = await signInWithGoogle()
-      if (err) { setError(friendlyAuthError(err.message)); setBusy(null) }
-      // On success the browser navigates away — leave the button in its loading state.
+      if (err) { fail(friendlyAuthError(err.message)); setBusy(null); return }
+      // Success normally navigates away. If the user cancels mid-redirect or the
+      // navigation never happens, don't spin forever — reset with a clear message.
+      googleTimer.current = setTimeout(() => {
+        setBusy(b => {
+          if (b === 'google') {
+            setError('Sign in was cancelled or timed out — please try again.')
+            return null
+          }
+          return b
+        })
+      }, 10000)
     } catch (e) {
-      setError(friendlyAuthError(e.message)); setBusy(null)
+      fail(friendlyAuthError(e.message)); setBusy(null)
     }
   }
 
   async function handleEmail(e) {
     e.preventDefault()
-    setBusy('email'); setError(null); onClearInitialError?.()
+    if (busy) return // double-submission guard
+    // First line of defense before the network: shape of the input
+    if (!EMAIL_RE.test(email.trim())) {
+      setError("That doesn't look like a valid email address."); return
+    }
+    if (mode === 'signup' && password.length < 8) {
+      setError('Passwords need at least 8 characters.'); return
+    }
+    setBusy('email'); setError(null); setNotConfirmed(false); onClearInitialError?.()
     try {
       if (mode === 'signup') {
         const { data, error: err } = await signUpWithEmail(email.trim(), password, name.trim())
-        if (err) setError(friendlyAuthError(err.message))
+        if (err) fail(friendlyAuthError(err.message))
         else if (!data?.session) setCheckEmail(true)
         // With a session, onAuthChange moves the user into the app.
       } else {
         const { error: err } = await signInWithEmail(email.trim(), password)
-        if (err) setError(friendlyAuthError(err.message))
+        if (err) {
+          if (/not confirmed/i.test(err.message)) setNotConfirmed(true)
+          fail(friendlyAuthError(err.message))
+        }
       }
     } catch (e2) {
-      setError(friendlyAuthError(e2.message))
+      fail(friendlyAuthError(e2.message))
     } finally {
       setBusy(null)
     }
+  }
+
+  async function handleResend() {
+    setResent(true)
+    try { await resendConfirmation(email.trim()) } catch { /* same calm message either way */ }
   }
 
   const busyAny = busy != null
@@ -2404,10 +2460,13 @@ function AuthScreen({ mode, onMode, onBack, onForgot, initialError, onClearIniti
               <div style={{ ...type.small, fontSize: 12.5, color: T.faint, marginTop: 12 }}>
                 Nothing arriving? Give it a minute, check your spam folder, or go back and try another address.
               </div>
-              <button onClick={() => switchMode('signin')} style={{
-                background: 'transparent', border: 'none', cursor: 'pointer',
-                ...type.small, color: T.accent, fontWeight: 560, marginTop: 18,
-              }}>Back to sign in</button>
+              <div style={{ ...type.small, fontSize: 13, marginTop: 18 }}>
+                Already have an account?{' '}
+                <button onClick={() => switchMode('signin')} style={{
+                  background: 'transparent', border: 'none', cursor: 'pointer', padding: 0,
+                  fontFamily: T.sans, fontSize: 13, color: T.accent, fontWeight: 560,
+                }}>Sign in instead</button>
+              </div>
             </div>
           ) : (
             <>
@@ -2458,7 +2517,21 @@ function AuthScreen({ mode, onMode, onBack, onForgot, initialError, onClearIniti
                 <div role="alert" style={{
                   ...type.small, fontSize: 13.5, color: T.bad, background: T.badBg,
                   borderRadius: 12, padding: '11px 15px', marginTop: 16,
-                }}>{shownError}</div>
+                }}>
+                  {shownError}
+                  {notConfirmed && (
+                    <div style={{ marginTop: 8 }}>
+                      {resent ? (
+                        <span style={{ color: T.ink }}>Confirmation email sent — check your inbox.</span>
+                      ) : (
+                        <button onClick={handleResend} style={{
+                          background: 'transparent', border: 'none', cursor: 'pointer', padding: 0,
+                          fontFamily: T.sans, fontSize: 13, color: T.accent, fontWeight: 560,
+                        }}>Resend the confirmation email</button>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
 
               <div style={{ textAlign: 'center', marginTop: 20 }}>
@@ -2521,8 +2594,8 @@ function ForgotPasswordScreen({ onBack }) {
           <div style={{ textAlign: 'center', padding: '18px 4px' }}>
             <div style={{ ...type.title, fontSize: 19, color: T.ink }}>Check your email.</div>
             <div style={{ ...type.small, marginTop: 10 }}>
-              We've sent a reset link to <strong style={{ color: T.ink, fontWeight: 560 }}>{email}</strong>.
-              Follow it and you'll be asked to choose a new password.
+              If an account exists for <strong style={{ color: T.ink, fontWeight: 560 }}>{email}</strong>,
+              a reset link is on its way. Follow it and you'll be asked to choose a new password.
             </div>
             <div style={{ ...type.small, fontSize: 12.5, color: T.faint, marginTop: 12 }}>
               Nothing arriving? Give it a minute or check your spam folder.
@@ -2570,10 +2643,10 @@ function ResetPasswordScreen({ theme, onDone }) {
     setBusy(true); setError(null)
     try {
       const { error: err } = await updatePassword(password)
-      if (err) setError(friendlyAuthError(err.message))
+      if (err) { setError(friendlyAuthError(err.message)); setPassword('') }
       else onDone()
     } catch (e2) {
-      setError(friendlyAuthError(e2.message))
+      setError(friendlyAuthError(e2.message)); setPassword('')
     } finally {
       setBusy(false)
     }
@@ -2625,6 +2698,58 @@ function ResetPasswordScreen({ theme, onDone }) {
  * ============================================================ */
 
 const LS_ONBOARD = 'matchiq_onboarding_seen'
+
+/* Abstract backdrop for the signed-out screens — large soft accent-tinted
+ * forms, slowly breathing, arranged differently per step so each screen has
+ * its own character. Crossfades with the step change so the whole screen
+ * moves as one. Pure gradient light: no photography, no extra colors. */
+const BACKDROP_SCENES = {
+  welcome: [
+    { left: '50%', top: '-12%', size: 640, tint: 16, dur: 11 },
+    { left: '82%', top: '78%', size: 400, tint: 8, dur: 14 },
+  ],
+  how: [
+    { left: '10%', top: '16%', size: 480, tint: 12, dur: 12 },
+    { left: '90%', top: '70%', size: 520, tint: 10, dur: 15 },
+  ],
+  signup: [
+    { left: '18%', top: '85%', size: 560, tint: 12, dur: 13 },
+    { left: '85%', top: '8%', size: 380, tint: 8, dur: 11 },
+  ],
+  signin: [
+    { left: '50%', top: '105%', size: 680, tint: 12, dur: 14 },
+  ],
+  reset: [
+    { left: '8%', top: '30%', size: 460, tint: 10, dur: 13 },
+  ],
+}
+
+function OnboardingBackdrop({ stage }) {
+  const reduce = useReducedMotion()
+  const scene = BACKDROP_SCENES[stage] || BACKDROP_SCENES.signin
+  return (
+    <div aria-hidden="true" style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
+      <AnimatePresence>
+        <motion.div key={stage}
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          transition={{ duration: 0.9, ease: 'easeInOut' }}
+          style={{ position: 'absolute', inset: 0 }}>
+          {scene.map((b, i) => (
+            <motion.span key={i}
+              animate={reduce ? undefined : { y: [0, -18, 0], scale: [1, 1.06, 1] }}
+              transition={reduce ? undefined : { duration: b.dur, repeat: Infinity, ease: 'easeInOut' }}
+              style={{
+                position: 'absolute', left: b.left, top: b.top,
+                width: b.size, height: b.size, marginLeft: -b.size / 2, marginTop: -b.size / 2,
+                borderRadius: '50%',
+                background: `radial-gradient(circle, color-mix(in oklab, ${T.accent} ${b.tint}%, transparent), transparent 70%)`,
+              }} />
+          ))}
+        </motion.div>
+      </AnimatePresence>
+    </div>
+  )
+}
 
 /* Staggered arrival for onboarding content — each block rises in turn */
 function Arrive({ children, order = 0, style }) {
@@ -2731,11 +2856,12 @@ function OnboardingFlow({ theme, initialError, onClearInitialError }) {
       padding: '48px 20px 72px', position: 'relative', zIndex: 1, overflow: 'hidden',
     }}>
       <GlobalStyles />
+      <OnboardingBackdrop stage={stage} />
       <AnimatePresence mode="wait">
         <motion.div key={stage}
           initial={{ opacity: 0, x: 14 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -14 }}
           transition={{ duration: 0.32, ease: 'easeOut' }}
-          style={{ width: '100%' }}>
+          style={{ width: '100%', position: 'relative' }}>
           {stage === 'welcome' && (
             <WelcomeScreen isMobile={isMobile}
               onStart={() => setStage('how')} onSignIn={() => setStage('signin')} />

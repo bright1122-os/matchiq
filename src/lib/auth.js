@@ -1,4 +1,5 @@
 import { supabase } from './supabase.js'
+import { LS_ANALYSIS, LS_TRACKED, LS_AGENT_PERF } from './storage.js'
 
 export async function signUpWithEmail(email, password, name) {
   return supabase.auth.signUp({
@@ -40,7 +41,17 @@ export async function updatePassword(password) {
 }
 
 export async function signOut() {
-  return supabase.auth.signOut()
+  const res = await supabase.auth.signOut()
+  // On a shared device the next account must not inherit this one's data.
+  // Theme and the onboarding flag are device prefs and deliberately survive.
+  try {
+    ;[LS_ANALYSIS, LS_TRACKED, LS_AGENT_PERF].forEach(k => window.localStorage.removeItem(k))
+  } catch { /* storage unavailable — nothing cached to clear */ }
+  return res
+}
+
+export async function resendConfirmation(email) {
+  return supabase.auth.resend({ type: 'signup', email })
 }
 
 export async function getSession() {
