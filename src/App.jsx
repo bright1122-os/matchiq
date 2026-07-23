@@ -25,6 +25,8 @@ import {
 } from './lib/auth.js'
 import { useAuth } from './hooks/useAuth.js'
 import { useUserData } from './hooks/useUserData.js'
+import { usePredictionLedger } from './hooks/usePredictionLedger.js'
+import { writePredictionToLedger, autoResolveInLedger, manualResolveInLedger } from './lib/ledger.js'
 
 /* ============================================================
  * QUIET SIGNAL — design language
@@ -2044,7 +2046,7 @@ function FollowingScreen({ fixtures, tracked, analysisCache, onOpen, onToggleTra
  * TRACK RECORD — honest accuracy
  * ============================================================ */
 
-function RecordScreen({ fixtures, analysisCache, agentPerf, onResolve, onOpen }) {
+function RecordScreen({ fixtures, analysisCache, agentPerf, onResolve, onOpen, verifiedRecord }) {
   const [openResolve, setOpenResolve] = useState(null)
 
   const entries = useMemo(() =>
@@ -2094,6 +2096,26 @@ function RecordScreen({ fixtures, analysisCache, agentPerf, onResolve, onOpen })
           </div>
         </div>
       </Reveal>
+
+      {/* Verified record — pulled directly from the Supabase ledger, shown
+          alongside the analysisCache numbers as a redundant correctness check */}
+      {verifiedRecord && verifiedRecord.count > 0 && (
+        <Reveal delay={0.04}>
+          <Card className="iq-elevated" style={{ padding: 24, marginTop: 26 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+              <div>
+                <Eyebrow style={{ color: T.accent }}>Verified record</Eyebrow>
+                <div style={{ ...type.small, fontSize: 13, marginTop: 6 }}>
+                  Straight from your permanent ledger — {verifiedRecord.correct} right of {verifiedRecord.count} settled.
+                </div>
+              </div>
+              <div style={{ ...type.display, fontSize: 34, color: T.ink, fontVariantNumeric: 'tabular-nums' }}>
+                {verifiedRecord.winRate == null ? '—' : `${verifiedRecord.winRate}%`}
+              </div>
+            </div>
+          </Card>
+        </Reveal>
+      )}
 
       {/* Headline */}
       <Reveal delay={0.06}>
@@ -3431,7 +3453,11 @@ function MatchIQ({ user }) {
       const fx = byId[id]
       if (!fx) continue
       const resolved = autoResolve(a, fx)
-      if (resolved) { next[id] = resolved; changed = true; perf = updateAgentPerformance(perf, resolved) }
+      if (resolved) {
+        next[id] = resolved; changed = true; perf = updateAgentPerformance(perf, resolved)
+        // Mirror the resolution into the permanent ledger (best-effort).
+        autoResolveInLedger(user, fx, resolved.actualResult)
+      }
     }
     if (changed) { setAnalysisCache(next); setAgentPerf(perf) }
   }, [fixtures])
@@ -3445,6 +3471,8 @@ function MatchIQ({ user }) {
         [id]: { ...a, resolved: true, autoResolved: false, correct, resolvedAt: Date.now() },
       }
     })
+    // Manual result → ledger, but only for rows auto-resolution hasn't claimed.
+    manualResolveInLedger(user, id, correct)
   }
 
   useEffect(() => { writeJSON(LS_TRACKED, Array.from(tracked)) }, [tracked])
@@ -3468,6 +3496,21 @@ function MatchIQ({ user }) {
       })
     }
   })
+
+  /* -------- prediction ledger: verified record read-back -------- */
+  const ledger = usePredictionLedger(user)
+  const [verifiedRecord, setVerifiedRecord] = useState(null)
+  useEffect(() => {
+    if (activeTab !== 'record') return
+    let cancelled = false
+    ledger.getResolvedPredictions().then(rows => {
+      if (cancelled) return
+      const count = rows.length
+      const correct = rows.filter(r => r.correct).length
+      setVerifiedRecord({ count, correct, winRate: count ? Math.round((correct / count) * 100) : null })
+    })
+    return () => { cancelled = true }
+  }, [activeTab, ledger])
 
   useEffect(() => {
     const k = import.meta.env.VITE_GROQ_API_KEY || ''
@@ -3630,6 +3673,8 @@ function MatchIQ({ user }) {
       parsed.competitionCode = fx.competitionCode
       setAnalysis(parsed)
       setAnalysisCache(prev => ({ ...prev, [fx.id]: parsed }))
+      // Parallel, permanent record. Best-effort: never blocks the analysis UI.
+      writePredictionToLedger(user, fx, parsed)
       setStatus('analysis', 'operational')
       setHealth('analysis', { code: 200, msg: `OK · ${fx.homeTeam} vs ${fx.awayTeam}`, at: Date.now() })
 
@@ -3704,7 +3749,8 @@ function MatchIQ({ user }) {
     )
     if (activeTab === 'record') return (
       <RecordScreen fixtures={fixtures} analysisCache={analysisCache}
-        agentPerf={agentPerf} onResolve={resolveManual} onOpen={openFixture} />
+        agentPerf={agentPerf} onResolve={resolveManual} onOpen={openFixture}
+        verifiedRecord={verifiedRecord} />
     )
     if (activeTab === 'profile') return (
       <ProfileScreen user={user} analysisCache={analysisCache} isMobile={isMobile}
